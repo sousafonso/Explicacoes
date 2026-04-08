@@ -66,7 +66,13 @@ app.set('views', path.join(__dirname, 'views'));
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(methodOverride('_method'));
+app.use(
+	methodOverride((req) => {
+		if (req.query && typeof req.query._method === 'string') return req.query._method;
+		if (req.body && typeof req.body._method === 'string') return req.body._method;
+		return undefined;
+	})
+);
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use(
@@ -222,6 +228,61 @@ app.post('/admin/exercises', requireAdmin, upload.single('attachment'), (req, re
 	writeExercises(exercises);
 
 	req.session.flash = { type: 'success', message: 'Exercício publicado com sucesso.' };
+	return res.redirect('/admin');
+});
+
+app.get('/admin/exercises/:id/edit', requireAdmin, (req, res) => {
+	const exercises = readExercises();
+	const exercise = exercises.find((item) => item.id === req.params.id);
+
+	if (!exercise) {
+		req.session.flash = { type: 'error', message: 'Exercício não encontrado.' };
+		return res.redirect('/admin');
+	}
+
+	res.render('admin-edit', { exercise, topics });
+});
+
+app.put('/admin/exercises/:id', requireAdmin, upload.single('attachment'), (req, res) => {
+	const { title, description, year, topic } = req.body;
+	const exercises = readExercises();
+	const exerciseIndex = exercises.findIndex((item) => item.id === req.params.id);
+
+	if (exerciseIndex === -1) {
+		req.session.flash = { type: 'error', message: 'Exercício não encontrado.' };
+		return res.redirect('/admin');
+	}
+
+	if (!title || !year || !topic) {
+		req.session.flash = {
+			type: 'error',
+			message: 'Título, ano e matéria são obrigatórios.',
+		};
+		return res.redirect(`/admin/exercises/${req.params.id}/edit`);
+	}
+
+	const exercise = exercises[exerciseIndex];
+
+	// Se um novo ficheiro foi enviado, remover o antigo
+	if (req.file) {
+		const oldFilePath = path.join(UPLOAD_DIR, exercise.fileName);
+		if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+
+		exercise.fileName = req.file.filename;
+		exercise.originalName = req.file.originalname;
+		exercise.mimeType = req.file.mimetype;
+		exercise.fileUrl = `/uploads/${req.file.filename}`;
+	}
+
+	// Atualizar campos editáveis
+	exercise.title = title.trim();
+	exercise.description = (description || '').trim();
+	exercise.year = normalizeCourse(year);
+	exercise.topic = topic.trim();
+
+	writeExercises(exercises);
+
+	req.session.flash = { type: 'success', message: 'Exercício atualizado com sucesso.' };
 	return res.redirect('/admin');
 });
 
